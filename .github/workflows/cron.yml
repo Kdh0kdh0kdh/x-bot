@@ -1,27 +1,38 @@
 name: x-bot
 
 on:
-   workflow_dispatch:
-   schedule:
+  workflow_dispatch:
+  schedule:
     - cron: "0 9 * * *"
 
 jobs:
   run:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v3
 
-      - uses: actions/setup-python@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
           python-version: "3.10"
 
-      - run: pwd
-      - run: ls -R .
-      - run: pip install -r requirements.txt
+      # データベースをキャッシュから復元
+      - name: Restore DB Cache
+        uses: actions/cache@v3
+        with:
+          path: posted.db
+          key: tweet-db-${{ github.run_id }}
+          restore-keys: |
+            tweet-db-
 
-      - run: ls -R .
-      - run: python main.py
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run bot
+        run: python main.py
         env:
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
@@ -29,3 +40,10 @@ jobs:
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           X_USER_ID: ${{ secrets.X_USER_ID }}
+
+      # 実行後のDBをキャッシュに保存
+      - name: Save DB Cache
+        uses: actions/cache@v3
+        with:
+          path: posted.db
+          key: tweet-db-${{ github.run_id }}
