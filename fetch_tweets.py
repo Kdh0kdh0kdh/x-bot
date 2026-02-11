@@ -11,20 +11,25 @@ def get_client():
     )
 
 def fetch_my_tweets(max_results: int = 100):
+    """
+    自分のツイートを取得し、
+    『本文＋画像URL』の形で返す
+    """
     client = get_client()
     user_id = os.environ["X_USER_ID"]
 
     tweets = client.get_users_tweets(
         id=user_id,
         max_results=max_results,
-        tweet_fields=["attachments"],
+        tweet_fields=["attachments", "created_at"],
         expansions=["attachments.media_keys"],
-        media_fields=["type"]
+        media_fields=["url", "type"]   # ★ url を取得するのがポイント
     )
 
     if not tweets.data:
         return []
 
+    # media_key -> mediaオブジェクト のマッピング
     media_dict = {}
     if tweets.includes and "media" in tweets.includes:
         for m in tweets.includes["media"]:
@@ -32,11 +37,19 @@ def fetch_my_tweets(max_results: int = 100):
 
     results = []
     for t in tweets.data:
+        image_url = None
+
+        # 画像がある場合、最初の画像URLを取得
+        if t.attachments and "media_keys" in t.attachments:
+            media = media_dict.get(t.attachments["media_keys"][0])
+            if media and media.type == "photo":
+                image_url = media.url
+
         results.append({
             "id": t.id,
             "text": t.text,
-            "attachments": t.attachments,
-            "media": [media_dict.get(k) for k in (t.attachments["media_keys"] if t.attachments else [])]
+            "image_url": image_url,   # ★ ここが重要
+            "created_at": t.created_at,
         })
 
     return results
