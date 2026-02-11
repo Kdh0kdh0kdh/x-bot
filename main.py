@@ -57,13 +57,79 @@ def main():
         tweet_fields=["text", "created_at"]
     )
 
-    if not response or not response.data:
+    if not response or response.data is None:
         print("ツイートが見つかりませんでした。")
         return
 
     # メディア情報のマッピング
-    media_map = {m.media_key: m for m in response.includes.get("media", [])} if response.includes else {}
+    media_map = {}
+    if response.includes and "media" in response.includes:
+        media_map = {m.media_key: m for m in response.includes["media"]}
 
     # 2. 画像付き かつ 未投稿 のツイートを抽出
     candidates = []
     for t in response.data:
+        # すでに投稿済みならスキップ
+        if is_already_posted(str(t.id)):
+            continue
+        
+        # 添付ファイルのチェック
+        attachments = getattr(t, 'attachments', None)
+        if attachments and "media_keys" in attachments:
+            m_key = attachments["media_keys"][0]
+            media = media_map.get(m_key)
+            
+            # 画像(photo)であり、URLが存在する場合のみ対象
+            if media and media.type == "photo" and hasattr(media, 'url') and media.url:
+                # 本文のクリーニング
+                clean_text = t.text
+                
+                # 冒頭の「RT @username: 」を削除
+                clean_text = re.sub(r'^RT @\w+: ', '', clean_text)
+                
+                # 文末のリンクURLを削除（画像添付時に自動で付くもの）
+                clean_text = re.sub(r'https://t\.co/\w+$', '', clean_text).strip()
+                
+                candidates.append({
+                    "id": t.id, 
+                    "text": clean_text, 
+                    "url": media.url
+                })
+
+    if not candidates:
+        print("投稿可能な新しい画像付きツイートがありません。")
+        return
+
+    # 3. ランダムに1つ選択
+    target = random.choice(candidates)
+    print(f"投稿対象ツイートID: {target['id']}")
+
+    # 4. 画像を一時ダウンロード
+    img_res = requests.get(target['url'])
+    temp_file = "temp_image.jpg"
+    with open(temp_file, "wb") as f:
+        f.write(img_res.content)
+    
+    try:
+        # 5. 画像をアップロード(v1.1)
+        media_upload_res = api_v1.media_upload(filename=temp_file)
+
+        # 6. 新規ツイートとして投稿(v2)
+        client_v2.create_tweet(
+            text=target['text'], 
+            media_ids=[media_upload_res.media_id]
+        )
+        
+        # 7. DBに記録
+        mark_as_posted(str(target['id']))
+        print("新規投稿が完了しました。")
+        
+    except Exception as e:
+        print(f"投稿エラー: {e}")
+    finally:
+        # 一時ファイルの削除
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
+
+if __name__ == "__main__":
+    main()
